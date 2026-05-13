@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-13
+
 ### Added
 
 - Initial public release. Benchmark and test WebAssembly inside browser
@@ -16,4 +18,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`wasm-harness <file.wasm>`) or as a cargo runner. Supports criterion
   benches, libtest tests, and real threading (d8 only) via Worker-per-thread.
 
-[Unreleased]: https://github.com/sinui0/wasm-harness/commits/main
+[Unreleased]: https://github.com/sinui0/wasm-harness/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/sinui0/wasm-harness/releases/tag/v0.1.0

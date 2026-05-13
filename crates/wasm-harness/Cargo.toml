@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Benchmark and test WebAssembly in browser JavaScript engines (V8, SpiderMonkey)."
+readme = "../../README.md"
+keywords = ["wasm", "webassembly", "benchmark", "wasi", "cargo"]
+categories = ["development-tools::cargo-plugins", "development-tools::testing", "wasm"]
 
 [[bin]]
 name = "wasm-harness"

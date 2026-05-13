@@ -1,0 +1,127 @@
+name: CI # Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1, wasm32-wasip1-threads
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install JS shells via jsvu
+        run: |
+          npm install -g jsvu
+          jsvu --os=linux64 --engines=v8,spidermonkey
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Host build + tests. Also produces target/release/wasm-harness
+      # which the wasi `cargo test --target` steps below need (the runner is
+      # referenced by .cargo/config.toml as the runner for wasm32-wasip1*).
+      - name: Build (workspace, all features, release)
+        run: cargo build --workspace --all-features --release
+
+      - name: Test (workspace, all features, release)
+        run: cargo test --workspace --all-features --release
+        env:
+          JS_SHELL: v8
+
+      - name: Wasi tests under V8
+        run: cargo test -p example --test smoke --target wasm32-wasip1 --release
+        env:
+          JS_SHELL: v8
+
+      - name: Wasi tests under SpiderMonkey
+        run: cargo test -p example --test smoke --target wasm32-wasip1 --release
+        env:
+          JS_SHELL: sm
+
+      - name: Wasi threads tests (V8)
+        run: cargo test -p example --test smoke --target wasm32-wasip1-threads --release --features threads
+        env:
+          JS_SHELL: v8
+
+      - name: Wasi threads tests (SpiderMonkey, falls back to single-threaded)
+        run: cargo test -p example --test smoke --target wasm32-wasip1-threads --release
+        env:
+          JS_SHELL: sm
+
+      # Bench smoke: short sample window — we're checking that the harness
+      # still produces a real criterion report, not measuring perf.
+      - name: Wasi bench smoke (V8)
+        run: |
+          cargo bench -p example --bench fib --target wasm32-wasip1 -- \
+            --sample-size 10 --warm-up-time 1 --measurement-time 1
+        env:
+          JS_SHELL: v8
+
+      - name: Wasi rayon bench smoke (V8, threaded)
+        run: |
+          cargo bench -p example --bench fib --target wasm32-wasip1-threads --features rayon -- \
+            busy_sum --sample-size 10 --warm-up-time 1 --measurement-time 1
+        env:
+          JS_SHELL: v8
+          RAYON_NUM_THREADS: "4"
+
+  rustfmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy check
+        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --document-private-items --all-features --workspace

@@ -1,0 +1,20 @@
+# Cargo runner for WASI test/bench artifacts in this workspace.
+#
+# Build the runner first:
+#   cargo build --release -p wasm-harness
+#
+# Then:
+#   cargo test  -p example --target wasm32-wasip1
+#   cargo bench -p example --target wasm32-wasip1
+#
+# A JS shell must be on PATH (or pointed at via $JS_SHELL). Easiest way:
+#   npm i -g jsvu && jsvu
+#
+# Downstream projects should `cargo install wasm-harness` and replace the
+# runner line with `runner = ["wasm-harness"]`.
+
+[target.wasm32-wasip1]
+runner = ["target/release/wasm-harness"]
+
+[target.wasm32-wasip1-threads]
+runner = ["target/release/wasm-harness"]

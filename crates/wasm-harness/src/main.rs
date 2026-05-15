@@ -156,9 +156,14 @@ fn build_js_shell_command(cmd: &mut Command, cli: &Cli) -> Result<()> {
 }
 
 /// Wire up a wasmtime invocation: `wasmtime run [engine-flags]
-/// [--env K=V ...] <wasm> -- [program args]`. Env forwarding uses
+/// [--env K=V ...] -- <wasm> [program args]`. Env forwarding uses
 /// wasmtime's native `--env` flag rather than the JS driver's
 /// `--env=K=V` script-arg convention.
+///
+/// The `--` goes *before* the wasm path so wasmtime stops parsing
+/// flags. Without it, criterion's `--sample-size`, libtest's
+/// `--test-threads`, etc. get interpreted as wasmtime options and the
+/// run fails with "unexpected argument found".
 fn build_wasmtime_command(cmd: &mut Command, cli: &Cli) {
     cmd.arg("run");
     for flag in &cli.engine_flags {
@@ -173,11 +178,9 @@ fn build_wasmtime_command(cmd: &mut Command, cli: &Cli) {
             cmd.arg(kv);
         }
     }
+    cmd.arg("--");
     cmd.arg(&cli.wasm);
-    if !cli.program_args.is_empty() {
-        cmd.arg("--");
-        cmd.args(&cli.program_args);
-    }
+    cmd.args(&cli.program_args);
 }
 
 /// Render an environment variable to the `--env=KEY=VALUE` form the JS

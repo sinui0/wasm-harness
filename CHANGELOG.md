@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-15
+
 ### Added
 
 - `wasmtime` is now supported as an engine alongside the JS shells. When
@@ -18,10 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Engine-selector env var renamed from `JS_SHELL` to
+- **Breaking:** engine-selector env var renamed from `JS_SHELL` to
   `WASM_HARNESS_ENGINE`. The CLI flag is still `--engine`.
-- `--shell-flag` renamed to `--engine-flag`. Forwards to whichever engine
-  is in use (e.g. `--liftoff-only` for d8, `-W threads=y` for wasmtime).
+- **Breaking:** `--shell-flag` renamed to `--engine-flag`. Forwards to
+  whichever engine is in use (e.g. `--liftoff-only` for d8,
+  `-W threads=y` for wasmtime).
 
 ## [0.1.0] - 2026-05-13
 
@@ -34,5 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`wasm-harness <file.wasm>`) or as a cargo runner. Supports criterion
   benches, libtest tests, and real threading (d8 only) via Worker-per-thread.
 
-[Unreleased]: https://github.com/sinui0/wasm-harness/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sinui0/wasm-harness/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sinui0/wasm-harness/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sinui0/wasm-harness/releases/tag/v0.1.0

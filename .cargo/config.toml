@@ -7,7 +7,8 @@
 #   cargo test  -p example --target wasm32-wasip1
 #   cargo bench -p example --target wasm32-wasip1
 #
-# A JS shell must be on PATH (or pointed at via $JS_SHELL). Easiest way:
+# An engine must be on PATH (or pointed at via $WASM_HARNESS_ENGINE).
+# Either install wasmtime (https://wasmtime.dev/), or grab a JS shell:
 #   npm i -g jsvu && jsvu
 #
 # Downstream projects should `cargo install wasm-harness` and replace the

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `wasmtime` is now supported as an engine alongside the JS shells. When
+  `--engine wasmtime` (or a `wasmtime` binary on `$PATH`) is selected, the
+  runner invokes wasmtime's native WASI directly and skips the bundled JS
+  driver. Env-var forwarding (whitelist / `WASM_HARNESS_ENV_*` /
+  `--inherit-env`) and program-arg passthrough work the same as for JS
+  shells. wasmtime is now the first auto-detected engine.
+
+### Changed
+
+- Engine-selector env var renamed from `JS_SHELL` to
+  `WASM_HARNESS_ENGINE`. The CLI flag is still `--engine`.
+- `--shell-flag` renamed to `--engine-flag`. Forwards to whichever engine
+  is in use (e.g. `--liftoff-only` for d8, `-W threads=y` for wasmtime).
+
 ## [0.1.0] - 2026-05-13
 
 ### Added

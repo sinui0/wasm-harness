@@ -1,7 +1,9 @@
-//! `wasm-harness` — benchmark and test WebAssembly inside browser JavaScript
-//! engines (V8 via `d8`, SpiderMonkey via `js`/`sm`). Takes a wasm file and
-//! runs it under the chosen JS shell with a minimal WASI snapshot_preview1
-//! polyfill. Designed to slot into `.cargo/config.toml` as a runner for
+//! `wasm-harness` — benchmark and test WebAssembly under a chosen engine.
+//! Supports browser JS shells (V8 via `d8`, SpiderMonkey via `js`/`sm`) and
+//! native wasm runtimes (`wasmtime`). Takes a wasm file and runs it under
+//! the chosen engine; for JS shells a minimal WASI snapshot_preview1
+//! polyfill is bundled, for `wasmtime` the runtime's native WASI is used.
+//! Designed to slot into `.cargo/config.toml` as a runner for
 //! `wasm32-wasip1` / `wasm32-wasip1-threads` targets, but the binary works
 //! standalone too — `wasm-harness <file.wasm>`.
 //!
@@ -12,31 +14,30 @@
 //! runner = ["wasm-harness"]
 //!
 //! [target.wasm32-wasip1-threads]
-//! runner = ["wasm-harness", "--engine", "v8"]
+//! runner = ["wasm-harness", "--engine", "wasmtime"]
 //! ```
 //!
 //! Install with `cargo install wasm-harness` so the binary lands on
 //! `$PATH`.
 //!
 //! Cargo invokes the runner as `wasm-harness [flags] <wasm> [program
-//! args]`. The runner spawns the JS shell with the bundled driver (a
-//! minimal WASI snapshot_preview1 polyfill), forwards stdout/stderr, and
-//! propagates the exit code.
+//! args]`. The runner spawns the selected engine, forwards stdout/stderr,
+//! and propagates the exit code.
 //!
 //! ### Engine selection
 //!
-//! In order of precedence: `--engine`, then `$JS_SHELL`, then an automatic
-//! search of `$PATH` and `~/.jsvu/bin/` for known engine binaries: `d8`,
-//! `v8`, `sm`, `spidermonkey`, `js`.
+//! In order of precedence: `--engine`, then `$WASM_HARNESS_ENGINE`, then an
+//! automatic search of `$PATH` and `~/.jsvu/bin/` for known engine
+//! binaries: `wasmtime`, `d8`, `v8`, `sm`, `spidermonkey`, `js`.
 //!
-//! Both `--engine` and `$JS_SHELL` accept either a path (used verbatim) or
-//! a short engine name (resolved against the same search dirs).
+//! Both `--engine` and `$WASM_HARNESS_ENGINE` accept either a path (used
+//! verbatim) or a short engine name (resolved against the same search
+//! dirs).
 //!
 //! ### Environment forwarding
 //!
-//! The wasm program runs in the shell's sandbox and inherits no host env by
-//! default. The runner forwards a whitelist to the wasm program via
-//! `--env=KEY=VALUE` script args:
+//! The wasm program runs in the engine's sandbox and inherits no host env
+//! by default. The runner forwards a whitelist to the wasm program:
 //!
 //! * `CRITERION_*`, `RUST_*`, `RAYON_*`, `NO_COLOR`
 //! * `WASM_HARNESS_ENV_X` is forwarded as `X` (opt-in escape hatch)
@@ -62,6 +63,7 @@ const DRIVER_FILE_NAME: &str = "wasm-harness-driver.js";
 /// Engine binary names we know about, in preference order. `js` is last
 /// because it's an ambiguous name on many systems.
 const KNOWN_ENGINES: &[&str] = &[
+    "wasmtime",     // Bytecode Alliance native wasm runtime
     "d8",           // V8 upstream
     "v8",           // jsvu alias for V8
     "sm",           // jsvu alias for SpiderMonkey
@@ -69,23 +71,25 @@ const KNOWN_ENGINES: &[&str] = &[
     "js",           // SpiderMonkey upstream
 ];
 
-/// Run a wasm32-wasip1 binary under a JS shell (d8 / SpiderMonkey).
+/// Run a wasm32-wasip1 binary under a chosen engine (wasmtime, d8,
+/// SpiderMonkey, ...).
 ///
 /// Forwards the wasm program's stdout/stderr/exit-code and propagates
-/// configured host environment variables through a `--env=KEY=VALUE`
-/// channel the bundled JS driver understands.
+/// configured host environment variables.
 #[derive(Parser, Debug)]
 #[command(version)]
 struct Cli {
-    /// JS shell to use. Accepts a path or a short engine name
-    /// (v8, sm, d8, spidermonkey, js). Overrides $JS_SHELL.
-    #[arg(long, value_name = "SHELL", env = "JS_SHELL")]
+    /// Engine to use. Accepts a path or a short engine name
+    /// (wasmtime, v8, sm, d8, spidermonkey, js). Overrides
+    /// $WASM_HARNESS_ENGINE.
+    #[arg(long, value_name = "ENGINE", env = "WASM_HARNESS_ENGINE")]
     engine: Option<String>,
 
-    /// Extra flag to pass to the JS shell itself (e.g. `--liftoff-only` for
-    /// d8). Repeatable. Hyphen-prefixed values are accepted as-is.
-    #[arg(long = "shell-flag", value_name = "FLAG", allow_hyphen_values = true)]
-    shell_flags: Vec<String>,
+    /// Extra flag to pass to the engine itself (e.g. `--liftoff-only` for
+    /// d8, `-W threads=y` for wasmtime). Repeatable. Hyphen-prefixed
+    /// values are accepted as-is.
+    #[arg(long = "engine-flag", value_name = "FLAG", allow_hyphen_values = true)]
+    engine_flags: Vec<String>,
 
     /// Forward every host env var to the wasm program instead of the
     /// default whitelist.
@@ -101,53 +105,108 @@ struct Cli {
     program_args: Vec<String>,
 }
 
+/// Which kind of engine we resolved to. Determines whether we go through
+/// the bundled JS driver or invoke the runtime directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EngineKind {
+    JsShell,
+    Wasmtime,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let driver_js = write_driver_script(&cli.wasm)?;
-    let shell = resolve_engine(cli.engine.as_deref())?;
+    let (engine_path, kind) = resolve_engine(cli.engine.as_deref())?;
 
-    let mut cmd = Command::new(&shell);
-    for flag in &cli.shell_flags {
+    let mut cmd = Command::new(&engine_path);
+    match kind {
+        EngineKind::JsShell => build_js_shell_command(&mut cmd, &cli)?,
+        EngineKind::Wasmtime => build_wasmtime_command(&mut cmd, &cli),
+    }
+
+    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    let status = cmd
+        .status()
+        .with_context(|| format!("failed to spawn engine at {}", engine_path.display()))?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+/// Wire up a JS-shell invocation: write out the driver next to the wasm,
+/// then `<shell> [flags] <driver.js> -- <wasm> --driver-path=... [args]
+/// [--env=K=V ...]`.
+fn build_js_shell_command(cmd: &mut Command, cli: &Cli) -> Result<()> {
+    let driver_js = write_driver_script(&cli.wasm)?;
+    for flag in &cli.engine_flags {
         cmd.arg(flag);
     }
     cmd.arg(&driver_js);
     cmd.arg("--");
     cmd.arg(&cli.wasm);
-    // Tell the driver where its own file lives so worker threads can
-    // re-spawn it via `new Worker(driverPath)`.
     let mut driver_path_arg = OsString::from("--driver-path=");
     driver_path_arg.push(&driver_js);
     cmd.arg(driver_path_arg);
     cmd.args(&cli.program_args);
 
     for (key, value) in env::vars_os() {
-        if let Some(injection) = host_env_to_arg(&key, &value, cli.inherit_env) {
+        if let Some(injection) = host_env_to_js_arg(&key, &value, cli.inherit_env) {
             cmd.arg(injection);
         }
     }
-
-    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-    let status = cmd
-        .status()
-        .with_context(|| format!("failed to spawn JS shell at {}", shell.display()))?;
-    std::process::exit(status.code().unwrap_or(1));
+    Ok(())
 }
 
-/// Render an environment variable to the `--env=KEY=VALUE` form the driver
-/// expects, if the variable is being forwarded.
-fn host_env_to_arg(key: &OsStr, value: &OsStr, inherit_env: bool) -> Option<OsString> {
+/// Wire up a wasmtime invocation: `wasmtime run [engine-flags]
+/// [--env K=V ...] <wasm> -- [program args]`. Env forwarding uses
+/// wasmtime's native `--env` flag rather than the JS driver's
+/// `--env=K=V` script-arg convention.
+fn build_wasmtime_command(cmd: &mut Command, cli: &Cli) {
+    cmd.arg("run");
+    for flag in &cli.engine_flags {
+        cmd.arg(flag);
+    }
+    for (key, value) in env::vars_os() {
+        if let Some((k, v)) = forwarded_env_pair(&key, &value, cli.inherit_env) {
+            cmd.arg("--env");
+            let mut kv = OsString::from(k);
+            kv.push("=");
+            kv.push(v);
+            cmd.arg(kv);
+        }
+    }
+    cmd.arg(&cli.wasm);
+    if !cli.program_args.is_empty() {
+        cmd.arg("--");
+        cmd.args(&cli.program_args);
+    }
+}
+
+/// Render an environment variable to the `--env=KEY=VALUE` form the JS
+/// driver expects, if the variable is being forwarded.
+fn host_env_to_js_arg(key: &OsStr, value: &OsStr, inherit_env: bool) -> Option<OsString> {
+    let (dest_key, value) = forwarded_env_pair(key, value, inherit_env)?;
+    let mut arg = OsString::from("--env=");
+    arg.push(dest_key);
+    arg.push("=");
+    arg.push(value);
+    Some(arg)
+}
+
+/// Decide whether a host env var should be forwarded, and under what
+/// destination name. Returns the destination `(key, value)` or `None` to
+/// drop. Shared between JS-shell and wasmtime invocations so both engines
+/// see the same env.
+fn forwarded_env_pair<'a>(
+    key: &'a OsStr,
+    value: &'a OsStr,
+    inherit_env: bool,
+) -> Option<(&'a str, &'a OsStr)> {
     let key_str = key.to_str()?;
     let dest_key = if inherit_env {
         Some(key_str)
     } else {
         forwarded_name(key_str)
     }?;
-    let mut arg = OsString::from("--env=");
-    arg.push(dest_key);
-    arg.push("=");
-    arg.push(value);
-    Some(arg)
+    Some((dest_key, value))
 }
 
 /// Map a host env var name to its destination name in the wasm program, or
@@ -183,25 +242,44 @@ fn write_driver_script(wasm: &Path) -> Result<PathBuf> {
     Ok(dst)
 }
 
-/// Resolve the engine to execute. Priority: explicit `--engine` / `$JS_SHELL`
-/// (clap handles that merge), then a fallback search of `$PATH` and
-/// `~/.jsvu/bin/` for known engine names.
-fn resolve_engine(requested: Option<&str>) -> Result<PathBuf> {
+/// Resolve the engine to execute. Priority: explicit `--engine` /
+/// `$WASM_HARNESS_ENGINE` (clap handles that merge), then a fallback
+/// search of `$PATH` and `~/.jsvu/bin/` for known engine names.
+fn resolve_engine(requested: Option<&str>) -> Result<(PathBuf, EngineKind)> {
     let search_dirs = engine_search_dirs();
     if let Some(req) = requested {
-        return resolve_named_or_path(req, &search_dirs)
-            .with_context(|| format!("resolving engine {req:?}"));
+        let path = resolve_named_or_path(req, &search_dirs)
+            .with_context(|| format!("resolving engine {req:?}"))?;
+        let kind = classify_engine(&path);
+        return Ok((path, kind));
     }
     for name in KNOWN_ENGINES {
         if let Some(p) = find_in(&search_dirs, name) {
-            return Ok(p);
+            let kind = classify_engine(&p);
+            return Ok((p, kind));
         }
     }
     anyhow::bail!(
-        "no JS shell found on $PATH or in ~/.jsvu/bin/. Install jsvu \
-         (https://github.com/GoogleChromeLabs/jsvu) and run `jsvu`, or pass \
-         --engine <path-or-name>."
+        "no engine found on $PATH or in ~/.jsvu/bin/. Install wasmtime, \
+         or install jsvu (https://github.com/GoogleChromeLabs/jsvu) and \
+         run `jsvu`, or pass --engine <path-or-name>."
     )
+}
+
+/// Classify a resolved engine path by its file stem. Anything we don't
+/// explicitly recognise as `wasmtime` is treated as a JS shell — that's
+/// the historical behavior and keeps unknown-but-jsvu-like binaries
+/// usable.
+fn classify_engine(path: &Path) -> EngineKind {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    if stem.eq_ignore_ascii_case("wasmtime") {
+        EngineKind::Wasmtime
+    } else {
+        EngineKind::JsShell
+    }
 }
 
 /// Resolve a user-supplied engine reference. Path-like values are used
@@ -310,9 +388,11 @@ mod tests {
         let cli = Cli::try_parse_from([
             "wasm-harness",
             "--engine",
-            "v8",
-            "--shell-flag",
-            "--liftoff-only",
+            "wasmtime",
+            "--engine-flag",
+            "-W",
+            "--engine-flag",
+            "threads=y",
             "--inherit-env",
             "/tmp/bench.wasm",
             "--bench",
@@ -322,8 +402,8 @@ mod tests {
         ])
         .expect("clap should accept these args");
 
-        assert_eq!(cli.engine.as_deref(), Some("v8"));
-        assert_eq!(cli.shell_flags, vec!["--liftoff-only"]);
+        assert_eq!(cli.engine.as_deref(), Some("wasmtime"));
+        assert_eq!(cli.engine_flags, vec!["-W", "threads=y"]);
         assert!(cli.inherit_env);
         assert_eq!(cli.wasm, PathBuf::from("/tmp/bench.wasm"));
         assert_eq!(
@@ -333,18 +413,35 @@ mod tests {
     }
 
     #[test]
-    fn host_env_to_arg_inherit_passes_unknowns() {
+    fn host_env_to_js_arg_inherit_passes_unknowns() {
         let key = OsString::from("PATH");
         let value = OsString::from("/usr/bin");
-        let arg = host_env_to_arg(&key, &value, true).unwrap();
+        let arg = host_env_to_js_arg(&key, &value, true).unwrap();
         assert_eq!(arg.to_string_lossy(), "--env=PATH=/usr/bin");
     }
 
     #[test]
-    fn host_env_to_arg_default_drops_unknowns() {
+    fn host_env_to_js_arg_default_drops_unknowns() {
         let key = OsString::from("PATH");
         let value = OsString::from("/usr/bin");
-        assert!(host_env_to_arg(&key, &value, false).is_none());
+        assert!(host_env_to_js_arg(&key, &value, false).is_none());
+    }
+
+    #[test]
+    fn classify_engine_recognises_wasmtime() {
+        assert_eq!(
+            classify_engine(Path::new("/usr/bin/wasmtime")),
+            EngineKind::Wasmtime
+        );
+        assert_eq!(
+            classify_engine(Path::new("/home/x/.cargo/bin/wasmtime")),
+            EngineKind::Wasmtime
+        );
+        assert_eq!(
+            classify_engine(Path::new("/usr/bin/d8")),
+            EngineKind::JsShell
+        );
+        assert_eq!(classify_engine(Path::new("sm")), EngineKind::JsShell);
     }
 
     /// The clap docs recommend running `Command::debug_assert()` in a test

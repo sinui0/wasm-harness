@@ -1,12 +1,12 @@
 //! End-to-end smoke test: build the example crate's test binary for
 //! `wasm32-wasip1`, run it through the runner, and check the output.
 //!
-//! Skipped automatically when no JS shell is available — the test runner
+//! Skipped automatically when no engine is available — the test runner
 //! itself emits a `println!` note and returns success rather than failing,
 //! so it's safe to run unconditionally in CI environments that may or may
-//! not have d8/sm installed.
+//! not have wasmtime / d8 / sm installed.
 //!
-//! Override the shell via `$JS_SHELL` (or `$D8`).
+//! Override the engine via `$WASM_HARNESS_ENGINE`.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -20,8 +20,8 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn js_shell_available() -> bool {
-    if std::env::var_os("JS_SHELL").is_some() || std::env::var_os("D8").is_some() {
+fn engine_available() -> bool {
+    if std::env::var_os("WASM_HARNESS_ENGINE").is_some() {
         return true;
     }
     let path = match std::env::var_os("PATH") {
@@ -29,7 +29,7 @@ fn js_shell_available() -> bool {
         None => return false,
     };
     for dir in std::env::split_paths(&path) {
-        for name in ["d8", "v8", "js", "sm", "spidermonkey"] {
+        for name in ["wasmtime", "d8", "v8", "js", "sm", "spidermonkey"] {
             if dir.join(name).is_file() {
                 return true;
             }
@@ -47,9 +47,9 @@ fn wasm32_wasip1_installed() -> bool {
 }
 
 #[test]
-fn example_tests_run_under_js_shell() {
-    if !js_shell_available() {
-        println!("skipping: no JS shell on PATH and $JS_SHELL/$D8 unset");
+fn example_tests_run_under_engine() {
+    if !engine_available() {
+        println!("skipping: no engine on PATH and $WASM_HARNESS_ENGINE unset");
         return;
     }
     if !wasm32_wasip1_installed() {

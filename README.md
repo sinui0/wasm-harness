@@ -44,9 +44,11 @@ wasm-harness --engine wasmtime path/to/bench.wasm
 ## Engine selection
 
 `--engine` and `$WASM_HARNESS_ENGINE` accept either a **path** or a
-**short name** (`wasmtime`, `v8`, `sm`, `d8`, `spidermonkey`, `js`),
+**short name** (`d8`, `v8`, `sm`, `spidermonkey`, `js`, `wasmtime`),
 resolved against `$PATH` and `~/.jsvu/bin/`. Precedence: `--engine` >
-`$WASM_HARNESS_ENGINE` > auto-search.
+`$WASM_HARNESS_ENGINE` > auto-search. Auto-search prefers V8 when
+installed (for threading support), falling back to other JS shells and
+finally wasmtime.
 
 Pin per-target in `.cargo/config.toml`:
 

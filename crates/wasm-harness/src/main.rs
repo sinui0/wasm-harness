@@ -28,7 +28,10 @@
 //!
 //! In order of precedence: `--engine`, then `$WASM_HARNESS_ENGINE`, then an
 //! automatic search of `$PATH` and `~/.jsvu/bin/` for known engine
-//! binaries: `wasmtime`, `d8`, `v8`, `sm`, `spidermonkey`, `js`.
+//! binaries: `d8`, `v8`, `sm`, `spidermonkey`, `js`, `wasmtime`. V8 is
+//! preferred when present because it ships the threading and
+//! shared-memory support that JS-shell users typically want; wasmtime is
+//! last so it's only auto-selected when no JS shell is installed.
 //!
 //! Both `--engine` and `$WASM_HARNESS_ENGINE` accept either a path (used
 //! verbatim) or a short engine name (resolved against the same search
@@ -63,12 +66,12 @@ const DRIVER_FILE_NAME: &str = "wasm-harness-driver.js";
 /// Engine binary names we know about, in preference order. `js` is last
 /// because it's an ambiguous name on many systems.
 const KNOWN_ENGINES: &[&str] = &[
-    "wasmtime",     // Bytecode Alliance native wasm runtime
-    "d8",           // V8 upstream
+    "d8",           // V8 upstream — default when present
     "v8",           // jsvu alias for V8
     "sm",           // jsvu alias for SpiderMonkey
     "spidermonkey", // distro-packaged SpiderMonkey
     "js",           // SpiderMonkey upstream
+    "wasmtime",     // Bytecode Alliance native wasm runtime
 ];
 
 /// Run a wasm32-wasip1 binary under a chosen engine (wasmtime, d8,

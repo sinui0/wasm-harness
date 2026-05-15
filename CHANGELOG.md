@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-15
+
+### Fixed
+
+- Wasmtime invocations now place the `--` separator *before* the wasm
+  path so that arguments forwarded to the wasm program (criterion's
+  `--sample-size`, libtest's `--test-threads`, and even cargo's default
+  `--bench`) are no longer re-parsed as wasmtime options. Previously
+  `cargo bench --target wasm32-wasip1` silently skipped all benches when
+  wasmtime was the selected engine.
+- Engine auto-detection now prefers V8 (`d8`) over wasmtime, so vanilla
+  `cargo bench` / `cargo test` against `wasm32-wasip1[-threads]` picks
+  up the JS-shell path with full threading support when V8 is present.
+  Wasmtime is still auto-selected when no JS shell is installed.
+
 ## [0.2.0] - 2026-05-15
 
 ### Added
@@ -37,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`wasm-harness <file.wasm>`) or as a cargo runner. Supports criterion
   benches, libtest tests, and real threading (d8 only) via Worker-per-thread.
 
-[Unreleased]: https://github.com/sinui0/wasm-harness/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sinui0/wasm-harness/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/sinui0/wasm-harness/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sinui0/wasm-harness/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sinui0/wasm-harness/releases/tag/v0.1.0
